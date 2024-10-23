@@ -137,9 +137,7 @@ func (ws *WebSocket) closeConnection(err error) {
 		}
 
 		// Notify any listener that the connection has been closed
-		if err != nil {
-			ws.Disconnected <- err
-		}
+		ws.Disconnected <- err
 
 		// Close all channels to free resources
 		close(ws.Connected)
