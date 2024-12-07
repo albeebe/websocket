@@ -49,6 +49,7 @@ type WebSocket struct {
 	IncomingMessages chan Message       // Channel for received messages
 	outgoingMessages chan Message       // Channel for outgoing messages
 	closeOnce        sync.Once          // Ensures close logic runs only once
+	writeMutex       sync.Mutex         // Synchronizes writes to the WebSocket connection.
 	conn             *websocket.Conn    // Underlying WebSocket connection
 }
 

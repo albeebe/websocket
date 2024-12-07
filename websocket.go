@@ -24,7 +24,9 @@ package websocket
 
 import (
 	"context"
+	"errors"
 	"fmt"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -64,6 +66,12 @@ func NewWebSocketClient(url string) *WebSocket {
 // readMessages continuously reads messages from the WebSocket connection and sends
 // them to the IncomingMessages channel.
 func (ws *WebSocket) readMessages() {
+	defer func() {
+		if r := recover(); r != nil {
+			ws.closeConnection(fmt.Errorf("panic during read message: %v", r))
+		}
+	}()
+
 	for {
 		select {
 		case <-ws.Context.Done(): // Context cancellation detected
@@ -98,8 +106,14 @@ func (ws *WebSocket) writeMessages() {
 		case <-ws.Context.Done(): // Context cancellation detected
 			ws.closeConnection(nil)
 			return
-		case message := <-ws.outgoingMessages: // Get the next message to send
+		case message, ok := <-ws.outgoingMessages:
+			if !ok {
+				// Channel is closed; exit the loop.
+				return
+			}
+			ws.writeMutex.Lock()
 			err := ws.conn.WriteMessage(int(message.Type), message.Data)
+			ws.writeMutex.Unlock()
 			if err != nil {
 				ws.closeConnection(err)
 				return
@@ -108,15 +122,23 @@ func (ws *WebSocket) writeMessages() {
 	}
 }
 
-// SendMessage queues a message to be sent through the WebSocket connection.
+// SendMessage queues a message for sending through the WebSocket connection.
+// Panics due to channel closure are gracefully handled.
 func (ws *WebSocket) SendMessage(messageType MessageType, data []byte) {
+	defer func() {
+		if r := recover(); r != nil {
+			ws.closeConnection(fmt.Errorf("panic during message send: %v", r))
+		}
+	}()
+
 	select {
-	case ws.outgoingMessages <- Message{
-		Type: messageType,
-		Data: data,
-	}:
-	case <-ws.Context.Done(): // Prevent sending messages if context is canceled
-		ws.closeConnection(nil)
+	case <-ws.Context.Done():
+		// Connection context is canceled; message is not sent.
+	case ws.outgoingMessages <- Message{Type: messageType, Data: data}:
+		// Message successfully enqueued.
+	default:
+		// Buffer is full; close the connection with an error.
+		ws.closeConnection(errors.New("outgoing message buffer is full"))
 	}
 }
 
